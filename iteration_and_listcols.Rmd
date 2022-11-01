@@ -1,0 +1,244 @@
+---
+title: "iteration_and_listcols"
+author: "Wenyan Ma"
+date: "2022-11-01"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(rvest)
+
+set.seed(1)
+```
+
+## Lists
+
+```{r}
+vec_numeric = 5:8
+vec_char = c("My", "name", "is", "Jeff")
+vec_logical = c(TRUE, TRUE, TRUE, FALSE)
+```
+
+```{r}
+l = list(
+  vec_numeric = 5:8,
+  mat         = matrix(1:8, 2, 4),
+  vec_logical = c(TRUE, FALSE),
+  summary     = summary(rnorm(1000)))
+l
+```
+
+accessing list items
+```{r}
+l$vec_numeric
+```
+
+## Loops!
+
+```{r}
+list_norms = 
+  list(
+    a = rnorm(20, 5, 4),
+    b = rnorm(20, -12, 3),
+    c = rnorm(20, 17, .4),
+    d = rnorm(20, 100, 1)
+  )
+
+is.list(list_norms)
+```
+
+here is my function
+```{r}
+mean_and_sd = function(x) {
+  
+  if (!is.numeric(x)) {
+    stop("Argument x should be numeric")
+  } else if (length(x) == 1) {
+    stop("Cannot be computed for length 1 vectors")
+  }
+  
+  mean_x = mean(x)
+  sd_x = sd(x)
+
+  tibble(
+    mean = mean_x, 
+    sd = sd_x
+  )
+}
+```
+
+```{r}
+mean_and_sd(list_norms[[1]])
+mean_and_sd(list_norms[[2]])
+mean_and_sd(list_norms[[3]])
+mean_and_sd(list_norms[[4]])
+```
+
+use 'for' loop instead
+```{r}
+output = vector("list", length = 4)
+
+for (i in 1:4) {
+  output[[i]] = mean_and_sd(list_norms[[i]])
+  
+}
+
+output
+```
+
+## can we map?
+
+we can map
+
+```{r}
+map(list_norms, mean_and_sd)
+
+map(list_norms, median)
+
+map_dbl(list_norms, median)
+
+map_df(list_norms, mean_and_sd)
+```
+
+
+## list columns...
+```{r}
+listcol_df = 
+  tibble(name = c("a", "b","c","d"),
+         norm = list_norms)
+
+listcol_df[["norm"]]
+
+map(listcol_df[["norm"]], mean_and_sd)
+
+output = map(listcol_df[["norm"]], mean_and_sd)
+```
+
+
+can we add list columns, and the nwhat
+```{r}
+listcol_df %>% 
+  mutate(m_sd = map_df(norm, mean_and_sd))
+```
+
+## what abot something more realistic 
+```{r}
+weather_df = 
+  rnoaa::meteo_pull_monitors(
+    c("USW00094728", "USC00519397", "USS0023B17S"),
+    var = c("PRCP", "TMIN", "TMAX"), 
+    date_min = "2017-01-01",
+    date_max = "2017-12-31") %>%
+  mutate(
+    name = recode(
+      id, 
+      USW00094728 = "CentralPark_NY", 
+      USC00519397 = "Waikiki_HA",
+      USS0023B17S = "Waterhole_WA"),
+    tmin = tmin / 10,
+    tmax = tmax / 10) %>%
+  select(name, id, everything())
+```
+
+lets nest within the weather df
+```{r}
+weather_nest = 
+  nest(weather_df, data = date:tmin)
+
+weather_nest
+```
+
+```{r}
+weather_nest[["data"]]
+```
+
+```{r}
+weather_nest[["data"]][[1]]
+
+lm(tmax ~ tmin, data = weather_nest[["data"]][[1]])
+```
+
+write a short function
+
+```{r}
+weather_lm = function(df){
+  
+  lm(tmax ~ tmin, data = df)
+}
+
+
+weather_lm(weather_nest[["data"]][[1]])
+
+map(weather_nest[["data"]], weather_lm)
+```
+
+do that in a tidy way
+```{r}
+weather_nest %>% 
+  mutate(model = map(data, weather_lm))
+```
+
+YUP
+
+
+unnesting
+```{r}
+weather_nest %>% 
+  unnest(data)
+```
+
+## Napolean!!
+```{r}
+read_page_reviews <- function(url) {
+  
+  html = read_html(url)
+  
+  review_titles = 
+    html %>%
+    html_nodes(".a-text-bold span") %>%
+    html_text()
+  
+  review_stars = 
+    html %>%
+    html_nodes("#cm_cr-review_list .review-rating") %>%
+    html_text() %>%
+    str_extract("^\\d") %>%
+    as.numeric()
+  
+  review_text = 
+    html %>%
+    html_nodes(".review-text-content span") %>%
+    html_text() %>% 
+    str_replace_all("\n", "") %>% 
+    str_trim() %>% 
+    str_subset("The media could not be loaded.", negate = TRUE) %>% 
+    str_subset("^$", negate = TRUE)
+  
+  tibble(
+    title = review_titles,
+    stars = review_stars,
+    text = review_text
+  )
+}
+
+url_base = "https://www.amazon.com/product-reviews/B00005JNBQ/ref=cm_cr_arp_d_viewopt_rvwer?ie=UTF8&reviewerType=avp_only_reviews&sortBy=recent&pageNumber="
+
+vec_urls = str_c(url_base, 1:5)
+
+map(vec_urls, read_page_reviews)
+```
+
+```{r}
+dynamite_reviews = 
+  tibble(
+    page = 1:5,
+    urls = str_c(url_base, page)) %>% 
+  mutate(reviews = map(urls, read_page_reviews)) %>% 
+  unnest() %>% 
+  select(-urls)
+```
+
+
+
